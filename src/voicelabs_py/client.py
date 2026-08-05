@@ -30,7 +30,13 @@ from ._client import (
     speech_body,
     transcription_body,
 )
-from .errors import GenerationFailedError, GenerationTimeoutError
+from ._retry import plan_retry
+from .errors import (
+    GenerationFailedError,
+    GenerationTimeoutError,
+    VoiceLabsAPIError,
+    VoiceLabsError,
+)
 from .models import (
     AudioFile,
     Capture,
@@ -398,18 +404,45 @@ class VoiceLabs(BaseVoiceLabs):
     # ── transport ────────────────────────────────────────────────────────────
 
     def _send(self, prepared: PreparedRequest) -> Any:
-        """Issue one prepared request and return its decoded body."""
-        try:
-            response = self._http.request(
-                prepared.method,
-                prepared.url,
-                params=prepared.params or None,
-                json=prepared.json,
-                headers=prepared.headers or None,
+        """Issue a prepared request, retrying per :mod:`voicelabs_py._retry`, and decode it."""
+        attempt = 0
+        started = time.monotonic()
+
+        while True:
+            error: VoiceLabsError
+            try:
+                response = self._http.request(
+                    prepared.method,
+                    prepared.url,
+                    params=prepared.params or None,
+                    json=prepared.json,
+                    headers=prepared.headers or None,
+                )
+            except httpx.HTTPError as exc:
+                error = connection_error(exc, prepared.method, prepared.url)
+            else:
+                try:
+                    return self._outcome(response)
+                except VoiceLabsAPIError as api_error:
+                    error = api_error
+
+            delay = plan_retry(
+                error,
+                attempt=attempt,
+                max_retries=self.max_retries,
+                retry_safe=prepared.retry_safe,
+                remaining_budget=self._remaining_budget(started),
             )
-        except httpx.HTTPError as exc:
-            raise connection_error(exc, prepared.method, prepared.url) from exc
-        return self._outcome(response)
+            if delay is None:
+                raise error
+            time.sleep(delay)
+            attempt += 1
+
+    def _remaining_budget(self, started: float) -> float | None:
+        """Seconds left of the client's timeout, or ``None`` when there is no timeout."""
+        if self.timeout is None:
+            return None
+        return self.timeout - (time.monotonic() - started)
 
 
 def _path_segment(value: str) -> str:
