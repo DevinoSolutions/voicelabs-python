@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from ._client import DEFAULT_BASE_URL, ENV_API_KEY
 from ._version import __version__
+from .async_client import AsyncVoiceLabs
 from .client import VoiceLabs
 from .errors import (
     ERROR_CODES,
@@ -58,6 +59,7 @@ __all__ = [
     "LANGUAGES",
     "MAX_AUDIO_BASE64_CHARS",
     "MAX_CAPTURES_PAGE_SIZE",
+    "AsyncVoiceLabs",
     "AudioFile",
     "AuthenticationError",
     "Capture",
