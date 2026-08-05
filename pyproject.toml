@@ -1,0 +1,91 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "voicelabs-py"
+dynamic = ["version"]
+description = "Official Python SDK for the VoiceLabs API — text-to-speech and transcription over HTTP."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Devino Solutions Inc.", email = "support@voicelabs.now" }]
+keywords = [
+  "voicelabs",
+  "text-to-speech",
+  "tts",
+  "transcription",
+  "speech-to-text",
+  "voice-cloning",
+  "api-client",
+  "sdk",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = ["httpx>=0.27,<1"]
+
+[project.urls]
+Homepage = "https://voicelabs.now"
+Documentation = "https://app.voicelabs.now/docs/api"
+Repository = "https://github.com/DevinoSolutions/voicelabs-python"
+Issues = "https://github.com/DevinoSolutions/voicelabs-python/issues"
+
+[project.optional-dependencies]
+dev = [
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "pytest-asyncio==1.4.0",
+  "respx==0.23.1",
+  "ruff==0.16.1",
+  "ty==0.0.66",
+]
+
+[tool.hatch.version]
+path = "src/voicelabs_py/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/voicelabs_py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",   # pycodestyle errors
+  "F",   # pyflakes
+  "I",   # isort
+  "UP",  # pyupgrade
+  "B",   # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "SIM", # flake8-simplify
+  "TID", # flake8-tidy-imports
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+
+[tool.ty.environment]
+python-version = "3.10"
+
+[tool.ty.src]
+include = ["src"]

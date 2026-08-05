@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.ty_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Env / secrets — never commit tokens
+.env
+.env.*
+*.token
+*.key
+vl_sandbox_*
+
+# OS
+.DS_Store
+Thumbs.db
