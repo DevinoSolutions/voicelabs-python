@@ -8,14 +8,38 @@ the API key, or refusing to poll a generation forever.
 
 from __future__ import annotations
 
+import os
+import time
 from collections.abc import Callable, Iterator
-from typing import Any
+from pathlib import Path
+from typing import Any, BinaryIO
 from urllib.parse import quote
 
 import httpx
 
-from ._client import BaseVoiceLabs, PreparedRequest, clamp_page_size, connection_error
-from .models import Capture, CaptureList, Generation, VoiceList
+from ._client import (
+    BaseVoiceLabs,
+    PreparedRequest,
+    audio_outcome,
+    audio_url_of,
+    bare_headers,
+    clamp_page_size,
+    connection_error,
+    generation_id_of,
+    poll_verdict,
+    speech_body,
+    transcription_body,
+)
+from .errors import GenerationFailedError, GenerationTimeoutError
+from .models import (
+    AudioFile,
+    Capture,
+    CaptureList,
+    Generation,
+    SpeechGeneration,
+    Transcription,
+    VoiceList,
+)
 from .rate_limit import RateLimitInfo
 
 __all__ = ["VoiceLabs"]
@@ -163,6 +187,213 @@ class VoiceLabs(BaseVoiceLabs):
         """
         prepared = self._prepare("GET", f"/v1/generations/{_path_segment(generation_id)}")
         return Generation.from_payload(self._send(prepared))
+
+    # ── writes (scope voice:generate) ────────────────────────────────────────
+
+    def create_speech(
+        self,
+        *,
+        text: str,
+        voice_id: str | None = None,
+        voice_name: str | None = None,
+        language: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> SpeechGeneration:
+        """Start generating speech. Returns IMMEDIATELY with a handle — the audio is not ready.
+
+        Follow with :meth:`wait_for_generation`, or use :meth:`generate_speech` to do both.
+
+        Args:
+            text: What to say, 1–10000 characters.
+            voice_id: A voice profile id. Mutually exclusive with ``voice_name``.
+            voice_name: A voice profile name. Mutually exclusive with ``voice_id``.
+            language: An ISO language code from :data:`~voicelabs_py.LANGUAGES`. Defaults to the
+                profile's own language.
+            idempotency_key: A key of your choosing (≤255 chars) that makes this write safe to
+                retry. Replaying the SAME key with the SAME body returns the ORIGINAL result
+                instead of generating again; replaying it with a DIFFERENT body raises
+                :class:`~voicelabs_py.IdempotencyError`. This is the answer to "my connection
+                dropped and I do not know whether the audio was made".
+
+        Returns:
+            A :class:`~voicelabs_py.SpeechGeneration` handle.
+
+        Raises:
+            VoiceLabsConfigError: ``text`` was empty, or both voice arguments were given.
+            VoiceLabsAPIError: The API answered with a problem document.
+        """
+        prepared = self._prepare(
+            "POST",
+            "/v1/speech",
+            body=speech_body(
+                text=text, voice_id=voice_id, voice_name=voice_name, language=language
+            ),
+            idempotency_key=idempotency_key,
+        )
+        return SpeechGeneration.from_payload(self._send(prepared))
+
+    def create_transcription(
+        self,
+        *,
+        audio: bytes | str | os.PathLike[str] | BinaryIO | None = None,
+        audio_base64: str | None = None,
+        language: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Transcription:
+        """Transcribe an audio clip. Returns the transcript synchronously.
+
+        The public surface is JSON with base64 audio, NOT multipart. The SDK encodes for you and
+        enforces the contract's 10 MiB base64 ceiling (about 7.5 MiB of raw audio) BEFORE the
+        request, so an oversized clip fails instantly rather than after a long upload.
+
+        Args:
+            audio: Raw ``bytes``, a filesystem path, or an open binary file object.
+            audio_base64: Already-encoded base64 text. Mutually exclusive with ``audio``.
+            language: An ISO language code, or ``None`` to let the API detect it.
+            idempotency_key: See :meth:`create_speech`.
+
+        Returns:
+            A :class:`~voicelabs_py.Transcription`.
+
+        Raises:
+            VoiceLabsConfigError: Neither or both audio arguments were given, the file could not
+                be read, or the encoded clip exceeds the documented cap.
+            VoiceLabsAPIError: The API answered with a problem document.
+        """
+        prepared = self._prepare(
+            "POST",
+            "/v1/transcriptions",
+            body=transcription_body(audio=audio, audio_base64=audio_base64, language=language),
+            idempotency_key=idempotency_key,
+        )
+        return Transcription.from_payload(self._send(prepared))
+
+    # ── helpers over the six operations ──────────────────────────────────────
+
+    def wait_for_generation(
+        self,
+        generation: Generation | SpeechGeneration | str,
+        *,
+        poll_interval: float = 2.0,
+        timeout: float = 300.0,
+        on_poll: Callable[[Generation], None] | None = None,
+    ) -> Generation:
+        """Poll a generation until it finishes, then return it.
+
+        The timeout is a REAL deadline, not a poll count. It NEVER returns an unfinished
+        generation: silently handing one back would push the failure into the caller's audio
+        pipeline instead of surfacing it here.
+
+        Args:
+            generation: A generation, a speech handle, or a bare generation id.
+            poll_interval: Seconds between polls. Defaults to 2.
+            timeout: Seconds to wait before giving up. Defaults to 300.
+            on_poll: Called with each intermediate result, for progress reporting.
+
+        Returns:
+            The completed :class:`~voicelabs_py.Generation`.
+
+        Raises:
+            GenerationFailedError: The generation reached a terminal ``failed`` state.
+            GenerationTimeoutError: The deadline passed first. The generation has NOT been
+                cancelled and may still complete — the error carries the last-seen generation.
+        """
+        generation_id = generation_id_of(generation)
+        started = time.monotonic()
+
+        while True:
+            current = self.get_generation(generation_id)
+            elapsed = time.monotonic() - started
+            verdict = poll_verdict(current, elapsed, poll_interval, timeout)
+
+            if verdict == "done":
+                return current
+            if verdict == "failed":
+                raise GenerationFailedError(current)
+            if on_poll is not None:
+                on_poll(current)
+            if verdict == "give_up":
+                raise GenerationTimeoutError(current, elapsed)
+            time.sleep(poll_interval)
+
+    def generate_speech(
+        self,
+        *,
+        text: str,
+        voice_id: str | None = None,
+        voice_name: str | None = None,
+        language: str | None = None,
+        idempotency_key: str | None = None,
+        poll_interval: float = 2.0,
+        timeout: float = 300.0,
+        on_poll: Callable[[Generation], None] | None = None,
+    ) -> Generation:
+        """Generate speech and wait for the audio in one call — the shape most callers want.
+
+        The idempotency key covers only the CREATE. If polling fails afterwards the audio still
+        exists; retrying the whole call with the same key returns the original generation rather
+        than making — and charging for — a second one.
+
+        Returns:
+            The completed :class:`~voicelabs_py.Generation`, ready for :meth:`download_audio`.
+
+        Raises:
+            GenerationFailedError: The generation failed.
+            GenerationTimeoutError: The generation was still running at the deadline.
+            VoiceLabsAPIError: The API answered with a problem document.
+        """
+        started = self.create_speech(
+            text=text,
+            voice_id=voice_id,
+            voice_name=voice_name,
+            language=language,
+            idempotency_key=idempotency_key,
+        )
+        return self.wait_for_generation(
+            started, poll_interval=poll_interval, timeout=timeout, on_poll=on_poll
+        )
+
+    def download_audio(self, generation: Generation | str) -> AudioFile:
+        """Download a completed generation's audio bytes.
+
+        Accepts a :class:`~voicelabs_py.Generation` or the ``audio_url`` string off one. The URL
+        is a signed, time-limited CAPABILITY: the signature is the authorization, it carries no
+        identity, and it is therefore fetched WITHOUT the API key — on a separate transport, so
+        no default header can leak into it.
+
+        Args:
+            generation: A completed generation, or its ``audio_url``.
+
+        Returns:
+            An :class:`~voicelabs_py.AudioFile` carrying the bytes and the served content type.
+
+        Raises:
+            VoiceLabsConfigError: The generation has no ``audio_url`` yet.
+            VoiceLabsAPIError: The download was refused — a 401 usually means the signature
+                expired, so re-poll the generation for a fresh URL.
+        """
+        url = audio_url_of(generation)
+        try:
+            with httpx.Client(timeout=self.timeout, follow_redirects=True) as bare:
+                response = bare.get(url, headers=bare_headers())
+        except httpx.HTTPError as exc:
+            raise connection_error(exc, "GET", url) from exc
+        return audio_outcome(response)
+
+    def write_audio(self, generation: Generation | str, path: str | os.PathLike[str]) -> Path:
+        """Download a generation's audio and write it to ``path``.
+
+        Args:
+            generation: A completed generation, or its ``audio_url``.
+            path: Where to write. Parent directories are created for you.
+
+        Returns:
+            The path written.
+        """
+        destination = Path(path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(self.download_audio(generation).content)
+        return destination
 
     # ── transport ────────────────────────────────────────────────────────────
 

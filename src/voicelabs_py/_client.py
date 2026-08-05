@@ -26,8 +26,11 @@ from .errors import (
     error_from_response,
 )
 from .models import (
+    GENERATION_STATUS,
     MAX_AUDIO_BASE64_CHARS,
     MAX_CAPTURES_PAGE_SIZE,
+    AudioFile,
+    Generation,
 )
 from .rate_limit import RateLimitInfo, rate_limit_from_headers, retry_after_seconds
 
@@ -178,6 +181,71 @@ class BaseVoiceLabs:
             rate_limit=rate_limit,
             retry_after=retry_after_seconds(response.headers),
         )
+
+
+def bare_headers() -> dict[str, str]:
+    """Headers for the signed audio capability URL — deliberately carrying NO credential.
+
+    ``GET /v1/audio/{id}`` is declared ``security: []`` in the contract: the signature in the URL
+    IS the authorization. Sending ``x-api-key`` there would hand a long-lived credential to
+    whatever host the URL points at, for a request that does not need it.
+    """
+    return {"user-agent": USER_AGENT, "accept": "*/*"}
+
+
+def audio_outcome(response: httpx.Response) -> AudioFile:
+    """Turn a capability-URL response into audio bytes, or raise the right typed error.
+
+    Args:
+        response: The response, already fully read.
+
+    Returns:
+        The audio and the content type the server served it as, so a caller can name the file
+        without guessing at the extension.
+
+    Raises:
+        VoiceLabsAPIError: The download was refused (401 on a stale signature, 404, 502, 503).
+    """
+    if not response.is_success:
+        raise error_from_response(
+            response.status_code,
+            _decode_json(response),
+            retry_after=retry_after_seconds(response.headers),
+        )
+    return AudioFile(
+        content=response.content,
+        content_type=response.headers.get("content-type", "application/octet-stream"),
+    )
+
+
+def generation_id_of(generation: Any) -> str:
+    """The id to poll, from a generation, a speech handle, or a bare id string."""
+    if isinstance(generation, str):
+        return generation
+    identifier = getattr(generation, "id", None)
+    if not isinstance(identifier, str) or not identifier:
+        raise VoiceLabsConfigError(
+            "Pass a Generation, a SpeechGeneration, or a generation id string — got "
+            f"{type(generation).__name__}."
+        )
+    return identifier
+
+
+def poll_verdict(
+    generation: Generation, elapsed: float, poll_interval: float, timeout: float
+) -> str:
+    """Decide what a polling loop does next: ``done``, ``failed``, ``wait``, or ``give_up``.
+
+    The deadline is checked BEFORE sleeping so an expired one reports promptly rather than after
+    one more full interval of waiting.
+    """
+    if generation.status == GENERATION_STATUS.completed:
+        return "done"
+    if generation.status == GENERATION_STATUS.failed:
+        return "failed"
+    if elapsed + poll_interval > timeout:
+        return "give_up"
+    return "wait"
 
 
 def _resolve_api_key(api_key: str | None) -> str:
@@ -365,9 +433,13 @@ __all__ = [
     "PreparedRequest",
     "USER_AGENT",
     "VoiceLabsAPIError",
+    "audio_outcome",
     "audio_url_of",
+    "bare_headers",
     "clamp_page_size",
     "connection_error",
+    "generation_id_of",
+    "poll_verdict",
     "speech_body",
     "transcription_body",
 ]
