@@ -53,7 +53,7 @@ dev = [
 ]
 
 [tool.hatch.version]
-path = "src/voicelabs_py/__init__.py"
+path = "src/voicelabs_py/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/voicelabs_py"]
