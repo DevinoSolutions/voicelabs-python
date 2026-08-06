@@ -41,7 +41,7 @@ API_KEY_HEADER = "x-api-key"
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 ENV_API_KEY = "VOICELABS_API_KEY"
 
-USER_AGENT = f"voicelabs-py/{__version__}"
+USER_AGENT = f"voicelabs-sdk/{__version__}"
 
 _MAX_IDEMPOTENCY_KEY_CHARS = 255
 

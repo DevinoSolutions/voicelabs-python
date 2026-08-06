@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "voicelabs-py"
+name = "voicelabs-sdk"
 dynamic = ["version"]
 description = "Official Python SDK for the VoiceLabs API — text-to-speech and transcription over HTTP."
 readme = "README.md"

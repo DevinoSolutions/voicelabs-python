@@ -1,4 +1,4 @@
-# VoiceLabs Python SDK (voicelabs-py)
+# VoiceLabs Python SDK (voicelabs-sdk)
 
 The official **Python client** for the [VoiceLabs](https://voicelabs.now) API — text to speech
 and transcription over HTTP, against `https://app.voicelabs.now/v1`.
@@ -10,10 +10,12 @@ error codes, and the same draft-11 rate-limit headers.
 ## Install
 
 ```bash
-pip install voicelabs-py
+pip install voicelabs-sdk
 ```
 
-Requires Python 3.10+. The import name is `voicelabs_py`.
+Requires Python 3.10+. The distribution is published as **`voicelabs-sdk`**, but the import
+package is **`voicelabs_py`** — `pip install voicelabs-sdk`, then `from voicelabs_py import
+VoiceLabs`.
 
 ## Authentication
 

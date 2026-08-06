@@ -164,7 +164,7 @@ def test_a_full_speech_round_trip_creates_polls_downloads_and_yields_real_audio_
 
 @requires_key
 def test_replaying_an_idempotency_key_returns_the_original_response_without_new_work(client):
-    key = f"voicelabs-py-e2e-{uuid.uuid4()}"
+    key = f"voicelabs-sdk-e2e-{uuid.uuid4()}"
     text = "Idempotency check."
 
     first = client.create_speech(text=text, idempotency_key=key)

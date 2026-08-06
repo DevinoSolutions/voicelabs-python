@@ -31,7 +31,7 @@ def test_the_api_key_travels_in_the_x_api_key_header_on_every_authenticated_call
 
     request = route.calls.last.request
     assert request.headers["x-api-key"] == API_KEY
-    assert request.headers["user-agent"].startswith("voicelabs-py/")
+    assert request.headers["user-agent"].startswith("voicelabs-sdk/")
     assert "authorization" not in request.headers
 
 

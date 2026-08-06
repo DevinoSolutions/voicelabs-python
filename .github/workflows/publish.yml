@@ -1,6 +1,6 @@
 # This workflow uses PyPI Trusted Publishing (OIDC) — no API token/password. It will
-# FAIL until a trusted publisher for the `voicelabs-py` project is registered on PyPI:
-#   PyPI -> project `voicelabs-py` -> Publishing -> add GitHub publisher:
+# FAIL until a trusted publisher for the `voicelabs-sdk` project is registered on PyPI:
+#   PyPI -> project `voicelabs-sdk` -> Publishing -> add GitHub publisher:
 #   owner: DevinoSolutions, repo: voicelabs-python, workflow: publish.yml,
 #   environment: pypi
 # Do NOT dispatch this workflow before that is done.
