@@ -59,13 +59,16 @@ def test_the_published_openapi_document_is_reachable_and_describes_the_shipped_s
     document = response.json()
     assert document["openapi"] == "3.1.1"
     assert document["info"]["version"] == "1.0.0"
-    assert len(document["paths"]) == 6
+    assert len(document["paths"]) == 9
     assert set(document["paths"]) == {
         "/v1/voices",
         "/v1/captures",
         "/v1/generations/{generationId}",
         "/v1/speech",
+        "/v1/audio/speech",
         "/v1/transcriptions",
+        "/v1/voices/default",
+        "/v1/voices/clone",
         "/v1/audio/{generationId}",
     }
 
@@ -164,16 +167,25 @@ def test_a_full_speech_round_trip_creates_polls_downloads_and_yields_real_audio_
 
 @requires_key
 def test_replaying_an_idempotency_key_returns_the_original_response_without_new_work(client):
+    # Production answers a profile-less speech with 400 `invalid_request`, so the keyed POSTs
+    # must name a real voice from the account.
+    voices = client.list_voices()
+    if not voices.data:
+        pytest.skip("LOUD SKIP: the account has no voice profiles to generate with.")
+    voice_id = voices.data[0].id
+
     key = f"voicelabs-sdk-e2e-{uuid.uuid4()}"
     text = "Idempotency check."
 
-    first = client.create_speech(text=text, idempotency_key=key)
-    replay = client.create_speech(text=text, idempotency_key=key)
+    first = client.create_speech(text=text, voice_id=voice_id, idempotency_key=key)
+    replay = client.create_speech(text=text, voice_id=voice_id, idempotency_key=key)
 
     assert first.id == replay.id
 
     with pytest.raises(IdempotencyError) as caught:
-        client.create_speech(text="A different body entirely.", idempotency_key=key)
+        client.create_speech(
+            text="A different body entirely.", voice_id=voice_id, idempotency_key=key
+        )
 
     assert caught.value.code == "idempotency_key_reused"
 
