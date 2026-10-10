@@ -167,13 +167,17 @@ def test_replaying_an_idempotency_key_returns_the_original_response_without_new_
     key = f"voicelabs-sdk-e2e-{uuid.uuid4()}"
     text = "Idempotency check."
 
-    first = client.create_speech(text=text, idempotency_key=key)
-    replay = client.create_speech(text=text, idempotency_key=key)
+    voices = client.list_voices()
+    voice_name = voices.data[0].name
+    first = client.create_speech(text=text, voice_name=voice_name, idempotency_key=key)
+    replay = client.create_speech(text=text, voice_name=voice_name, idempotency_key=key)
 
     assert first.id == replay.id
 
     with pytest.raises(IdempotencyError) as caught:
-        client.create_speech(text="A different body entirely.", idempotency_key=key)
+        client.create_speech(
+            text="A different body entirely.", voice_name=voice_name, idempotency_key=key
+        )
 
     assert caught.value.code == "idempotency_key_reused"
 
@@ -194,3 +198,29 @@ def test_a_key_without_the_generate_scope_is_refused_with_insufficient_scope():
 
     assert caught.value.code == "insufficient_scope"
     assert caught.value.required_scope == "voice:generate"
+
+
+@requires_key
+def test_wire_probe_of_a_keyed_speech_request_and_its_replay(client):
+    """TEMPORARY diagnostic for voicelabs#64 - prints status and framing headers, never a secret."""
+    import datetime
+
+    voice_name = client.list_voices().data[0].name
+    key = f"voicelabs-wire-probe-{uuid.uuid4()}"
+    for label in ("first", "replay"):
+        stamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        response = httpx.post(
+            f"{PROD}/v1/speech",
+            headers={"x-api-key": API_KEY, "idempotency-key": key, "user-agent": USER_AGENT},
+            json={"text": "Wire probe.", "voice_name": voice_name},
+            timeout=60.0,
+        )
+        framing = {
+            name: response.headers.get(name)
+            for name in ("content-type", "content-length", "content-encoding", "transfer-encoding")
+        }
+        print(
+            f"WIREPROBE {label} at={stamp} status={response.status_code} {framing} "
+            f"bytes={len(response.content)}"
+        )
+        assert response.status_code == 200
