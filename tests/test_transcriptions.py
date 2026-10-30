@@ -10,8 +10,13 @@ import httpx
 import pytest
 import respx
 
-from tests.helpers import API_KEY, BASE_URL
-from voicelabs_py import MAX_AUDIO_BASE64_CHARS, VoiceLabs, VoiceLabsConfigError
+from tests.helpers import API_KEY, BASE_URL, problem
+from voicelabs_py import (
+    MAX_AUDIO_BASE64_CHARS,
+    PayloadTooLargeError,
+    VoiceLabs,
+    VoiceLabsConfigError,
+)
 
 AUDIO = b"RIFF____WAVEfmt fake audio bytes"
 
@@ -142,3 +147,24 @@ def test_an_unreadable_audio_path_is_refused_before_the_request(tmp_path):
         sdk.create_transcription(audio=tmp_path / "does-not-exist.wav")
 
     assert "Could not read the audio file" in str(caught.value)
+
+
+@respx.mock
+def test_a_413_from_the_api_raises_payload_too_large_and_is_never_retried():
+    route = respx.post(f"{BASE_URL}/v1/transcriptions").mock(
+        return_value=httpx.Response(
+            413,
+            json=problem(code="payload_too_large", status=413, max_bytes=10_489_856),
+            headers={"content-type": "application/problem+json"},
+        )
+    )
+
+    # Retries left ON: the same body is refused at the same size every time.
+    with (
+        VoiceLabs(api_key=API_KEY, max_retries=2) as sdk,
+        pytest.raises(PayloadTooLargeError) as raised,
+    ):
+        sdk.create_transcription(audio=AUDIO)
+
+    assert raised.value.max_bytes == 10_489_856
+    assert route.call_count == 1

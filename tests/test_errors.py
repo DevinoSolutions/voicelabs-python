@@ -14,6 +14,7 @@ from voicelabs_py.errors import (
     InvalidRequestError,
     MethodNotAllowedError,
     NotFoundError,
+    PayloadTooLargeError,
     QuotaExhaustedError,
     RateLimitError,
     ServerError,
@@ -31,6 +32,7 @@ CODE_TO_CLASS = {
     "not_found": NotFoundError,
     "method_not_allowed": MethodNotAllowedError,
     "idempotency_key_in_progress": IdempotencyError,
+    "payload_too_large": PayloadTooLargeError,
     "idempotency_key_reused": IdempotencyError,
     "rate_limit_exceeded": RateLimitError,
     "quota_exhausted": QuotaExhaustedError,
@@ -85,6 +87,48 @@ def test_quota_exhausted_carries_the_settings_url_a_human_can_act_on():
 
     assert isinstance(error, QuotaExhaustedError)
     assert error.settings_url == "https://voicelabs.now/settings/billing"
+
+
+def test_a_413_payload_too_large_names_the_body_limit_and_is_not_worth_retrying():
+    error = error_from_response(
+        413,
+        problem(
+            code="payload_too_large",
+            status=413,
+            detail="The request body is larger than the 10489856 bytes this endpoint accepts.",
+            max_bytes=10_489_856,
+        ),
+    )
+
+    assert isinstance(error, PayloadTooLargeError)
+    # No field is wrong, so it is not an invalid request: only a smaller body can succeed.
+    assert not isinstance(error, InvalidRequestError)
+    assert error.max_bytes == 10_489_856
+    assert error.problem is not None
+    assert error.problem.max_bytes == 10_489_856
+    assert error.retryable is False
+
+
+def test_a_max_bytes_that_is_not_an_integer_is_dropped_rather_than_trusted():
+    error = error_from_response(
+        413, problem(code="payload_too_large", status=413, max_bytes="lots")
+    )
+
+    assert isinstance(error, PayloadTooLargeError)
+    assert error.max_bytes is None
+
+
+def test_a_body_less_or_html_413_from_a_proxy_is_still_payload_too_large():
+    # Cloudflare refuses a body over its own limit with an HTML 413 before the API sees it.
+    html = error_from_response(413, "<html><body>413 Request Entity Too Large</body></html>")
+    empty = error_from_response(413, None)
+
+    for error in (html, empty):
+        assert isinstance(error, PayloadTooLargeError)
+        assert error.code == "payload_too_large"
+        assert error.problem is None
+        assert error.max_bytes is None
+        assert error.retryable is False
 
 
 def test_an_unknown_error_code_degrades_to_the_base_api_error_instead_of_crashing():

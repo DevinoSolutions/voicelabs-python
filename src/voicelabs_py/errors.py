@@ -10,6 +10,11 @@ returns two DIFFERENT problems under one HTTP status, twice::
     403 -> insufficient_scope   this credential was not granted the scope. Mint a wider key.
     403 -> feature_not_enabled  the plan does not include the capability at all.
 
+One more is worth naming because it looks like a bad request and is not::
+
+    413 -> payload_too_large    the body is over the endpoint's size cap (``max_bytes``). No
+                                field is wrong; only a smaller body succeeds.
+
 A client that branches on ``response.status_code`` gets both pairs wrong, and the second mistake
 is expensive: retrying ``quota_exhausted`` on a backoff loop burns the caller's rate budget
 forever without ever succeeding. So the SDK branches on the problem document's ``code`` extension
@@ -37,6 +42,7 @@ __all__ = [
     "InvalidRequestError",
     "MethodNotAllowedError",
     "NotFoundError",
+    "PayloadTooLargeError",
     "ProblemDocument",
     "QuotaExhaustedError",
     "RateLimitError",
@@ -58,6 +64,7 @@ ERROR_CODES: tuple[str, ...] = (
     "not_found",
     "method_not_allowed",
     "idempotency_key_in_progress",
+    "payload_too_large",
     "idempotency_key_reused",
     "rate_limit_exceeded",
     "quota_exhausted",
@@ -81,6 +88,7 @@ class ProblemDocument:
         required_scope: On ``insufficient_scope``, the scope this credential was missing.
         settings_url: On ``quota_exhausted`` / ``feature_not_enabled``, where the account owner
             resolves it.
+        max_bytes: On ``payload_too_large``, the endpoint's request-body cap in bytes.
     """
 
     type: str
@@ -91,6 +99,7 @@ class ProblemDocument:
     instance: str | None = None
     required_scope: str | None = None
     settings_url: str | None = None
+    max_bytes: int | None = None
 
     @classmethod
     def from_payload(cls, payload: Any, *, status: int) -> ProblemDocument | None:
@@ -113,6 +122,7 @@ class ProblemDocument:
         if not isinstance(code, str) or not isinstance(detail, str):
             return None
         raw_status = payload.get("status")
+        raw_max_bytes = payload.get("max_bytes")
         return cls(
             type=payload["type"] if isinstance(payload.get("type"), str) else _type_uri(code),
             title=payload["title"] if isinstance(payload.get("title"), str) else code,
@@ -128,6 +138,12 @@ class ProblemDocument:
             settings_url=(
                 payload.get("settings_url")
                 if isinstance(payload.get("settings_url"), str)
+                else None
+            ),
+            # ``bool`` is an ``int`` subclass; a stray ``true`` is not a byte count.
+            max_bytes=(
+                raw_max_bytes
+                if isinstance(raw_max_bytes, int) and not isinstance(raw_max_bytes, bool)
                 else None
             ),
         )
@@ -235,6 +251,21 @@ _RETRYABLE_CODES = frozenset(
 
 class InvalidRequestError(VoiceLabsAPIError):
     """400 ``invalid_request`` — the request did not satisfy the operation's schema."""
+
+
+class PayloadTooLargeError(VoiceLabsAPIError):
+    """413 ``payload_too_large`` — the request body is over the endpoint's size cap.
+
+    NOT a subclass of :class:`InvalidRequestError`: no field is wrong, so reading ``detail`` for
+    one to fix is a dead end. Only a smaller body succeeds (shorter or re-encoded inline audio),
+    so it is never retried. Also raised for the HTML 413 a proxy in front of the API (Cloudflare)
+    answers with, in which case ``max_bytes`` is ``None``.
+    """
+
+    @property
+    def max_bytes(self) -> int | None:
+        """The request-body cap the request went over, in bytes, when the API stated it."""
+        return self.problem.max_bytes if self.problem else None
 
 
 class AuthenticationError(VoiceLabsAPIError):
@@ -353,6 +384,7 @@ _ERROR_CLASSES: dict[str, type[VoiceLabsAPIError]] = {
     "not_found": NotFoundError,
     "method_not_allowed": MethodNotAllowedError,
     "idempotency_key_in_progress": IdempotencyError,
+    "payload_too_large": PayloadTooLargeError,
     "idempotency_key_reused": IdempotencyError,
     "rate_limit_exceeded": RateLimitError,
     "quota_exhausted": QuotaExhaustedError,
@@ -370,6 +402,8 @@ def _synthesized_code(status: int) -> str:
         403: "insufficient_scope",
         404: "not_found",
         405: "method_not_allowed",
+        # Cloudflare answers a body over its own limit with an HTML 413 before the API sees it.
+        413: "payload_too_large",
         429: "rate_limit_exceeded",
         502: "upstream_error",
         503: "service_unavailable",
