@@ -154,6 +154,12 @@ A client that branches on `response.status_code` gets both pairs wrong, and the 
 expensive: retrying `quota_exhausted` on a backoff loop burns your rate budget forever without
 ever succeeding.
 
+A body over an endpoint's size cap (inline audio on `create_transcription`) raises
+`PayloadTooLargeError` (`413 payload_too_large`), not `InvalidRequestError`: no field is wrong,
+`exc.max_bytes` gives the limit, and it is never retried because only a smaller body can succeed.
+The HTML 413 a proxy in front of the API answers with raises the same class, with
+`max_bytes` set to `None`.
+
 The full hierarchy:
 
 ```
@@ -170,6 +176,7 @@ VoiceLabsError                       catch-all
    ├─ NotFoundError                  not_found                                  404
    ├─ MethodNotAllowedError          method_not_allowed                         405
    ├─ IdempotencyError               idempotency_key_in_progress | _reused       409 / 422
+   ├─ PayloadTooLargeError           payload_too_large     (.max_bytes)         413
    ├─ RateLimitError                 rate_limit_exceeded   (.retry_after)       429
    ├─ QuotaExhaustedError            quota_exhausted       (.settings_url)      429
    └─ ServerError                    upstream_error | internal_error |
