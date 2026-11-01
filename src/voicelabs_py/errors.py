@@ -66,6 +66,7 @@ ERROR_CODES: tuple[str, ...] = (
     "idempotency_key_in_progress",
     "payload_too_large",
     "idempotency_key_reused",
+    "transcript_unusable",
     "rate_limit_exceeded",
     "quota_exhausted",
     "upstream_error",
@@ -268,6 +269,16 @@ class PayloadTooLargeError(VoiceLabsAPIError):
         return self.problem.max_bytes if self.problem else None
 
 
+class TranscriptUnusableError(VoiceLabsAPIError):
+    """422 ``transcript_unusable`` — the audio looped or held no speech, so no transcript was kept.
+
+    The unit is refunded and no capture is saved. ``detail`` says which case it was: a recognition
+    loop can come back clean if the same audio is sent once more by hand, while a recording with
+    no speech fails the same way every time. Never retried automatically: the audio is the
+    problem, not the request.
+    """
+
+
 class AuthenticationError(VoiceLabsAPIError):
     """401 ``unauthorized`` — no credential, an unusable one, or a browser session.
 
@@ -386,6 +397,7 @@ _ERROR_CLASSES: dict[str, type[VoiceLabsAPIError]] = {
     "idempotency_key_in_progress": IdempotencyError,
     "payload_too_large": PayloadTooLargeError,
     "idempotency_key_reused": IdempotencyError,
+    "transcript_unusable": TranscriptUnusableError,
     "rate_limit_exceeded": RateLimitError,
     "quota_exhausted": QuotaExhaustedError,
     "upstream_error": ServerError,

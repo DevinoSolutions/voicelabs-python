@@ -18,6 +18,7 @@ from voicelabs_py.errors import (
     QuotaExhaustedError,
     RateLimitError,
     ServerError,
+    TranscriptUnusableError,
     VoiceLabsAPIError,
     VoiceLabsError,
     error_from_response,
@@ -34,6 +35,7 @@ CODE_TO_CLASS = {
     "idempotency_key_in_progress": IdempotencyError,
     "payload_too_large": PayloadTooLargeError,
     "idempotency_key_reused": IdempotencyError,
+    "transcript_unusable": TranscriptUnusableError,
     "rate_limit_exceeded": RateLimitError,
     "quota_exhausted": QuotaExhaustedError,
     "upstream_error": ServerError,
@@ -129,6 +131,24 @@ def test_a_body_less_or_html_413_from_a_proxy_is_still_payload_too_large():
         assert error.problem is None
         assert error.max_bytes is None
         assert error.retryable is False
+
+
+def test_a_422_transcript_unusable_is_its_own_class_and_not_an_idempotency_error():
+    # The other 422 is idempotency_key_reused; branching on status alone would confuse the two.
+    error = error_from_response(
+        422,
+        problem(
+            code="transcript_unusable",
+            status=422,
+            detail="No speech was detected in the recording, so no transcript was saved.",
+        ),
+    )
+
+    assert isinstance(error, TranscriptUnusableError)
+    assert not isinstance(error, IdempotencyError)
+    assert error.status == 422
+    # The audio has to change (or, for a loop, be resent once by hand): never auto-retried.
+    assert error.retryable is False
 
 
 def test_an_unknown_error_code_degrades_to_the_base_api_error_instead_of_crashing():

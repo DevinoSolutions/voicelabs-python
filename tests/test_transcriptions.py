@@ -14,6 +14,7 @@ from tests.helpers import API_KEY, BASE_URL, problem
 from voicelabs_py import (
     MAX_AUDIO_BASE64_CHARS,
     PayloadTooLargeError,
+    TranscriptUnusableError,
     VoiceLabs,
     VoiceLabsConfigError,
 )
@@ -167,4 +168,23 @@ def test_a_413_from_the_api_raises_payload_too_large_and_is_never_retried():
         sdk.create_transcription(audio=AUDIO)
 
     assert raised.value.max_bytes == 10_489_856
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_a_422_transcript_unusable_raises_its_own_error_and_is_not_retried():
+    route = respx.post(f"{BASE_URL}/v1/transcriptions").mock(
+        return_value=httpx.Response(
+            422,
+            json=problem(code="transcript_unusable", status=422),
+            headers={"content-type": "application/problem+json"},
+        )
+    )
+
+    with (
+        VoiceLabs(api_key=API_KEY, max_retries=2) as sdk,
+        pytest.raises(TranscriptUnusableError),
+    ):
+        sdk.create_transcription(audio=AUDIO)
+
     assert route.call_count == 1

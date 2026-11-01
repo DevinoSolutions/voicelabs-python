@@ -160,6 +160,11 @@ A body over an endpoint's size cap (inline audio on `create_transcription`) rais
 The HTML 413 a proxy in front of the API answers with raises the same class, with
 `max_bytes` set to `None`.
 
+Audio that decodes but yields no usable transcript, because recognition looped or there was no
+speech in it, raises `TranscriptUnusableError` (`422 transcript_unusable`). No capture is saved and
+the unit is refunded. It is never retried automatically: `exc.detail` says which case it was, and
+only a looping result can come back clean if you send the same audio once more yourself.
+
 The full hierarchy:
 
 ```
@@ -177,6 +182,7 @@ VoiceLabsError                       catch-all
    ├─ MethodNotAllowedError          method_not_allowed                         405
    ├─ IdempotencyError               idempotency_key_in_progress | _reused       409 / 422
    ├─ PayloadTooLargeError           payload_too_large     (.max_bytes)         413
+   ├─ TranscriptUnusableError        transcript_unusable                        422
    ├─ RateLimitError                 rate_limit_exceeded   (.retry_after)       429
    ├─ QuotaExhaustedError            quota_exhausted       (.settings_url)      429
    └─ ServerError                    upstream_error | internal_error |
